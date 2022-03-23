@@ -71,8 +71,6 @@ impl PrettyDescriptor {
         }
       };
     }
-
-    target.write(b"\n").expect("Failed to write");
   }
 
   fn pretty_value(value: &Value) -> String {

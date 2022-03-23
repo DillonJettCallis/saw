@@ -1,24 +1,31 @@
 extern crate core;
+#[macro_use]
+extern crate lazy_static;
+
+use std::fs::File;
+use std::io::{BufRead, BufReader, BufWriter, Read, Seek, stdout, Write};
+use std::path::PathBuf;
+use std::str::FromStr;
+
+use datetime::LocalDateTime;
+use flate2::Compression;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
+use glob::Pattern;
+use regex::Regex;
+use serde_json::{Map, Value};
+
+use args::Arguments;
+use crate::chunk::{ChunkedWriter, ChunkInfo, LogWriter};
+
+use crate::filter::FilterSet;
+use crate::pretty::PrettyDescriptor;
 
 mod args;
 mod chunk;
 mod pretty;
 mod utils;
-
-use args::Arguments;
-
-use std::fs::File;
-use std::io::{stdout, BufRead, BufReader, BufWriter, Read, Seek, Write};
-use std::path::PathBuf;
-use std::str::FromStr;
-
-use crate::pretty::PrettyDescriptor;
-use datetime::LocalDateTime;
-use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
-use flate2::Compression;
-use glob::Pattern;
-use serde_json::{Map, Value};
+mod filter;
 
 fn main() {
   let args = Arguments::parse();
@@ -28,7 +35,7 @@ fn main() {
 
   let ranged = do_range(agg, args.range);
   let filtered = do_filter(ranged, args.filter);
-  let writer = handle_output(args.output);
+  let writer = handle_output(args.output, args.chunked, args.zip);
   do_pretty(filtered, args.pretty, writer);
 }
 
@@ -213,19 +220,11 @@ impl Iterator for Aggregator {
 
 fn do_filter<Iter: 'static + Iterator<Item=Line>>(
   src: Iter,
-  maybe_pattern: Option<Pattern>,
+  maybe_pattern: Option<FilterSet>,
 ) -> Box<dyn Iterator<Item=Line>> {
   if let Some(filter) = maybe_pattern {
     Box::new(src.filter(move |row| {
-      if let Some(value) = row.value.get("message") {
-        if let Value::String(message) = value {
-          filter.matches(message)
-        } else {
-          false
-        }
-      } else {
-        false
-      }
+      filter.matches(&row.value)
     }))
   } else {
     Box::new(src)
@@ -256,29 +255,42 @@ fn do_range<Iter: 'static + Iterator<Item=Line>>(
   }
 }
 
-fn handle_output(maybe_output: Option<PathBuf>) -> Box<dyn Write> {
+fn handle_output(maybe_output: Option<PathBuf>, chunked: Option<ChunkInfo>, zipped: bool) -> Box<dyn LogWriter> {
   if let Some(output) = maybe_output {
-    let target = File::create(output).expect("Could not create output file");
+    if let Some(chunk_info) = chunked {
+      Box::new(ChunkedWriter::new(output, chunk_info, zipped))
+    } else {
+      let target = File::create(output).expect("Could not create output file");
 
-    Box::new(BufWriter::new(target))
+      handle_zip(BufWriter::new(target), zipped)
+    }
   } else {
-    Box::new(BufWriter::new(stdout()))
+    handle_zip(BufWriter::new(stdout()), zipped)
   }
 }
 
-fn do_pretty<Iter: 'static + Iterator<Item=Line>, Target: Write>(
+fn handle_zip<Writer: 'static + Write + LogWriter>(src: Writer, zip: bool) -> Box<dyn LogWriter> {
+  if zip {
+    Box::new(GzEncoder::new(src, Compression::best()))
+  } else {
+    Box::new(src)
+  }
+}
+
+fn do_pretty<Iter: 'static + Iterator<Item=Line>>(
   src: Iter,
   maybe_pretty: Option<PrettyDescriptor>,
-  mut target: Target,
+  mut target: Box<dyn LogWriter>,
 ) {
   if let Some(pretty) = maybe_pretty {
-    src.for_each(move |line| pretty.print(line.value, &mut target))
-  } else {
-    let mut zipped = GzEncoder::new(target, Compression::best());
-
     src.for_each(move |line| {
-      serde_json::to_writer(&mut zipped, &line.value).expect("Failed to write line");
-      zipped.write(b"\n").expect("Failed to write line");
+      pretty.print(line.value, &mut target);
+      target.end_line();
+    })
+  } else {
+    src.for_each(move |line| {
+      serde_json::to_writer(&mut target, &line.value).expect("Failed to write line");
+      target.end_line();
     })
   }
 }
