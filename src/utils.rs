@@ -1,5 +1,3 @@
-use std::ops::Add;
-
 pub trait StringIter {
   fn join(self, deliminator: &str) -> String;
 }

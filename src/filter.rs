@@ -1,10 +1,5 @@
-use std::collections::HashSet;
-use std::fmt::format;
-use std::str::Chars;
-use glob::Pattern;
-use serde_json::{Map, Value};
 use regex::Regex;
-
+use serde_json::{Map, Value};
 
 #[derive(Debug)]
 pub struct FilterSet {
@@ -14,11 +9,12 @@ pub struct FilterSet {
 #[derive(Debug)]
 pub struct Filter {
   key: String,
+  inverse: bool,
   pattern: Regex,
 }
 
 lazy_static! {
-  static ref PATTERN: Regex = Regex::new(r"^(%(\w+)=)?(.*)$").unwrap();
+  static ref PATTERN: Regex = Regex::new(r"^(%(\w+)(!)?=)?(.*)$").unwrap();
 }
 
 impl FilterSet {
@@ -28,7 +24,7 @@ impl FilterSet {
       if sum {
         if let Some(value) = line.get(&next.key) {
           if let Some(base) = value.as_str() {
-            next.pattern.is_match(base)
+            next.pattern.is_match(base) ^ next.inverse
           } else {
             false
           }
@@ -45,12 +41,13 @@ impl FilterSet {
     let captures = PATTERN.captures(base).expect(&format!("Filter input {base} does not match valid pattern. Run saw --help filter for more information"));
 
     let key = captures.get(2).map_or("message", |m| m.as_str()).to_owned();
-    let body = captures.get(3).expect(&format!("Filter input {base} does not match valid pattern. Run saw --help filter for more information"))
+    let inverse = captures.get(3).is_some();
+    let body = captures.get(4).expect(&format!("Filter input {base} does not match valid pattern. Run saw --help filter for more information"))
       .as_str();
 
     let pattern = Regex::new(body).expect(&format!("Filter is not a valid regex according to https://github.com/rust-lang/regex"));
 
 
-    Filter{key, pattern}
+    Filter{key, inverse, pattern}
   }
 }

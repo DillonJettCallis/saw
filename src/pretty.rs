@@ -1,7 +1,8 @@
-use serde_json::{Map, Value};
 use std::io::Write;
-use std::ops::Add;
-use crate::utils::StringIter;
+use std::collections::HashMap;
+
+use serde_json::{Map, Value};
+
 use crate::utils::ExtraIter;
 
 #[derive(Debug)]
@@ -13,6 +14,17 @@ pub struct PrettyDescriptor {
 enum PrettyFragment {
   Literal(String),
   Variable(String),
+}
+
+lazy_static! {
+  static ref ESCAPE_MAP: HashMap<char, char> = HashMap::from([
+    ('t', '\t'),
+    ('s', ' '),
+    ('n', '\n'),
+    ('r', '\r'),
+    ('%', '%'),
+    ('\\', '\\'),
+  ]);
 }
 
 /**
@@ -30,12 +42,17 @@ impl PrettyDescriptor {
   pub fn parse(pattern: &str) -> PrettyDescriptor {
     let mut fragments: Vec<PrettyFragment> = vec![];
 
-    let mut src = pattern.chars().peekable();
-
+    let mut src = pattern.chars();
     let mut state = PrettyFragment::Literal(String::new());
 
     while let Some(next) = src.next() {
       match (&mut state, next) {
+        (frag, '\\') => {
+          fragments.push(frag.clone());
+          let follow = src.next().expect("Pattern cannot end with an unmatched '\\' character.");
+          let found = ESCAPE_MAP.get(&follow).expect(&format!("Pattern contained unknown and invalid escape sequence '{follow}'"));
+          state = PrettyFragment::Literal(found.to_string());
+        }
         (frag, '%') => {
           fragments.push(frag.clone());
           state = PrettyFragment::Variable(String::new());

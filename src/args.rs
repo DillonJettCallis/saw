@@ -4,7 +4,7 @@ use std::process::exit;
 use std::str::FromStr;
 
 use datetime::LocalDateTime;
-use glob::{glob, Pattern};
+use glob::glob;
 
 use crate::chunk::ChunkInfo;
 use crate::filter::FilterSet;
@@ -12,20 +12,21 @@ use crate::pretty::PrettyDescriptor;
 
 const HELP: &str = r#"
 saw SOURCE_FILES
-   -h, --help [TOPIC]     Print help. If TOPIC is provided it will give more detail or list the topics
-   -v, --version          Prints the version of saw
-   -p, --pretty [PATTERN] Pretty print output as text instead of gzipped json PATTERN is optional and defines a pattern
-   -f, --filter PATTERN   Filter based on contents, PATTERN defines how and what to match on
-   -o, --output PATH      Instead of outputting to stdout, pipe results to a file directly
-   -c, --chunked [SIZE]   Requires --output option. Chunks output into multiple files based on size or number of lines
-   -r, --range MIN MAX    Filters logs to between the two given timestamps, (min is inclusive, max is exclusive)
-   -z, --zip true|false   Gzip output. Defaults to true if output is provided and false otherwise
-   -j, --json true|false  Output as JSON. Has defaults for all cases. Passing true while also providing pretty is illegal
+  -h, --help [TOPIC]     Print help. If TOPIC is provided it will give more detail or list the topics
+  -v, --version          Prints the version of saw
+  -p, --pretty [PATTERN] Pretty print output as text instead of gzipped json PATTERN is optional and defines a pattern
+  -f, --filter PATTERN   Filter based on contents, PATTERN defines how and what to match on
+  -o, --output PATH      Instead of outputting to stdout, pipe results to a file directly
+  -c, --chunked [SIZE]   Requires --output option. Chunks output into multiple files based on size or number of lines
+  -r, --range MIN MAX    Filters logs to between the two given timestamps, (min is inclusive, max is exclusive)
+  -z, --zip true|false   Gzip output. Defaults to true if output is provided and false otherwise
+  -j, --json true|false  Output as JSON. Has defaults for all cases. Passing true while also providing pretty is illegal
 
 help TOPIC values are:
   pretty    How pretty printing patterns work
   filter    How filtering patterns work
-  chunked   THe syntax for chunked size limits
+  range     How to use the range option
+  chunked   The syntax for chunked size limits
 "#;
 
 const PRETTY_TOPIC: &str = r#"
@@ -65,11 +66,38 @@ For example: "%stack=NullPointer" will match any stack field that contains the w
 If a log does not contain a 'stack' field, it is automatically excluded. There is no way to
 apply a filter conditionally.
 
+Applying an empty filter works to confirm the field exists. For example: "%stack=" will print
+all events that have a stack, regardless of what they contain.
+
+A filter can be negated like this: "%message!=something". This will return all events where the message
+does NOT contain the word "something".
+
 To apply multiple filters, simply pass --filter more than once. These filters are always ANDed together.
 There is currently no way to OR two filters. Multiple filters can touch the same or different fields.
 
-For example: `saw -f Controller -f %stack=NullPointer` will find all messages that contain the word
-"Controler" and also have a stacktrace that contains the word "NullPointer".
+For example: `saw -f Controller -f %stack=NullPointer` -f %level!=DEBUG will find all messages that contain the word
+"Controller" and also have a stacktrace that contains the word "NullPointer" but who's level is NOT "DEBUG".
+"#;
+
+const RANGE_TOPIC: &str = r#"
+Usage:
+  saw --range MIN MAX
+
+Range is used to select events from a specific time frame. The JSON field must be named "time".
+
+The format must be ISO8601 local date time, which looks like this:
+Example: "2020-03-01T12:00:00" which selects exactly noon on March 1st, 2020.
+
+To break that down, it means: [year]-[month from 01-12]-[day from 01-31]T[hour from 01-24]:[minute from 00-59]:[second from 00-59]
+
+Ranges must be exact, you can't leave off any part, not even the seconds at the end.
+This is a likely area of improvement in the future.
+
+You can however supply "*" as either the MIN or MAX to provide an open-ended time range.
+
+Strictly speaking you can supply * for both MIN and MAX and this is equivalent to not providing a range at all.
+
+MIN is inclusive, MAX is exclusive.
 "#;
 
 const CHUNKED_TOPIC: &str = r#"
@@ -91,7 +119,7 @@ Options for this code are
   ln: Lines
 
   The byte bases ones will create a new file once the old file exceded the given limit, and the
-  line based one will once it has proccessed that many lines. Not that "lines" means lines of INPUT,
+  line based one will once it has proccessed that many lines. Note that "lines" means lines of INPUT,
   or in other words JSON objects, not lines of OUTPUT in the case of using the pretty printer.
 
 Examples:
@@ -141,12 +169,15 @@ impl Arguments {
         match next.as_ref() {
           "-h" | "--help" => {
             if let Some(topic) = src.next() {
-              match topic.as_ref() {
-                "pretty" => eprintln!("{}", PRETTY_TOPIC),
-                "filter" => eprintln!("{}", FILTER_TOPIC),
-                "chunked" => eprintln!("{}", CHUNKED_TOPIC),
-                _ => eprintln!("{}", HELP)
-              }
+              let message = match topic.as_ref() {
+                "pretty"  => PRETTY_TOPIC,
+                "filter"  => FILTER_TOPIC,
+                "range"   => RANGE_TOPIC,
+                "chunked" => CHUNKED_TOPIC,
+                _         => HELP
+              };
+
+              println!("{}", message);
               exit(0)
             }
 
@@ -164,12 +195,12 @@ impl Arguments {
 
             if let Some(pattern) = src.peek() {
               if pattern.starts_with('-') {
-                init.pretty = Some(PrettyDescriptor::parse(DEFAULT_PRETTY));
+                init.pretty = Some(Arguments::load_default_pattern());
               } else {
                 init.pretty = Some(PrettyDescriptor::parse(&src.next().unwrap()));
               }
             } else {
-              init.pretty = Some(PrettyDescriptor::parse(DEFAULT_PRETTY));
+              init.pretty = Some(Arguments::load_default_pattern());
             }
           }
           "-f" | "--filter" => {
@@ -311,7 +342,7 @@ impl Arguments {
       } else {
         // if you specified json false, we need to default pretty if you did not
         if init.pretty.is_none() {
-          init.pretty = Some(PrettyDescriptor::parse(DEFAULT_PRETTY));
+          init.pretty = Some(Arguments::load_default_pattern());
         }
       }
     } else {
@@ -322,7 +353,7 @@ impl Arguments {
 
         // if you did not specify pretty, default it on
         if init.pretty.is_none() {
-          init.pretty = Some(PrettyDescriptor::parse(DEFAULT_PRETTY));
+          init.pretty = Some(Arguments::load_default_pattern());
         }
       }
     }
@@ -343,5 +374,14 @@ impl Arguments {
       ))
       .map(|p| p.expect(&format!("Source '{raw}' is not valid or could not be read")))
       .collect()
+  }
+
+  /**
+   * Either load up the default from an environment variable or take the default provided
+   */
+  fn load_default_pattern() -> PrettyDescriptor {
+    return env::var("SAW_PATTERN")
+      .map(| it | PrettyDescriptor::parse(&it))
+      .unwrap_or(PrettyDescriptor::parse(DEFAULT_PRETTY));
   }
 }

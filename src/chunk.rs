@@ -1,6 +1,7 @@
 use std::fs::File;
-use std::io::{BufWriter, stdout, Write};
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
+
 use flate2::Compression;
 use flate2::write::GzEncoder;
 

@@ -11,21 +11,19 @@ use datetime::LocalDateTime;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use glob::Pattern;
-use regex::Regex;
 use serde_json::{Map, Value};
 
 use args::Arguments;
-use crate::chunk::{ChunkedWriter, ChunkInfo, LogWriter};
 
+use crate::chunk::{ChunkedWriter, ChunkInfo, LogWriter};
 use crate::filter::FilterSet;
 use crate::pretty::PrettyDescriptor;
 
 mod args;
 mod chunk;
+mod filter;
 mod pretty;
 mod utils;
-mod filter;
 
 fn main() {
   let args = Arguments::parse();
@@ -176,7 +174,7 @@ struct Aggregator {
 
 impl Aggregator {
   fn new(mut logs: Vec<LogFile>) -> Aggregator {
-    // load up inital values and remove any that are empty
+    // load up initial values and remove any that are empty
     logs.iter_mut().for_each(|log| {
       log.advance();
       ()
