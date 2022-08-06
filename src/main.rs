@@ -18,6 +18,7 @@ use args::Arguments;
 use crate::chunk::{ChunkedWriter, ChunkInfo, LogWriter};
 use crate::filter::FilterSet;
 use crate::pretty::PrettyDescriptor;
+use crate::translate::Translation;
 
 mod args;
 mod chunk;
@@ -34,8 +35,9 @@ fn main() {
 
   let ranged = do_range(agg, args.range);
   let filtered = do_filter(ranged, args.filter);
+  let translated = do_translate(filtered, args.translations);
   let writer = handle_output(args.output, args.chunked, args.zip);
-  do_pretty(filtered, args.pretty, writer);
+  do_pretty(translated, args.pretty, writer);
 }
 
 struct FileSource {
@@ -252,6 +254,23 @@ fn do_range<Iter: 'static + Iterator<Item=Line>>(
       Box::new(src.filter(move |line| range.contains(&line.time)))
     }
   }
+}
+
+fn do_translate<Iter: 'static + Iterator<Item=Line>>(
+  src: Iter,
+  translations: Vec<Translation>,
+) -> Box<dyn Iterator<Item=Line>> {
+  if translations.is_empty() {
+    return Box::new(src);
+  }
+
+  return Box::new(src.map(move |mut line| {
+    for trans in &translations {
+      trans.translate(&mut line.value);
+    }
+
+    line
+  }));
 }
 
 fn handle_output(maybe_output: Option<PathBuf>, chunked: Option<ChunkInfo>, zipped: bool) -> Box<dyn LogWriter> {

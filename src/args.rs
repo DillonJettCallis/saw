@@ -9,6 +9,7 @@ use glob::glob;
 use crate::chunk::ChunkInfo;
 use crate::filter::FilterSet;
 use crate::pretty::PrettyDescriptor;
+use crate::translate::Translation;
 
 const HELP: &str = r#"
 saw SOURCE_FILES
@@ -100,35 +101,20 @@ Strictly speaking you can supply * for both MIN and MAX and this is equivalent t
 MIN is inclusive, MAX is exclusive.
 "#;
 
-/**
-
-Possible actions
-
-rename field
-delete field
-copy field
-regex field
-trim field
-concat multiple fields
-
-*/
-
 const TRANSLATE_TOPIC: &str = r#"
 Usage:
-  saw --translate [SUB_TASK]
+  saw --translate TARGET_FIELD PATTERN
 
-SUB_TASK values are as such:
-  rename OLD_NAME NEW_NAME    Rename a field from OLD_NAME to NEW_NAME.
-  delete FIELD                Remove field with this name.
-  copy FIELD NEW_FIELD        Duplicates FIELD with the new name NEW_FIELD.
-  trim FIELD                  Removes leading and trailing whitespace around FIELD.
-  concat NEW_FIELD PATTERN    Create a new field based upon a pattern supplied by PATTERN
-                                  which is implemented the same way as PRETTY
+Used to transform values in the event before writing it.
 
+The TARGET param is the key in the event that the result will be applied to.
+Can be an existing or new field. If the PATTERN returns a blank string
+then the field will be deleted. 'blank' is defined as a string contining only whitespace.
 
-Translate is used to perform regex replacements on fields.
-Translation always occures AFTER filter and BEFORE pretty.
+PATTERN is a pattern in exactly the same form as used in --pretty
 
+Multiple translations can be applied by passing the argument more than once, and they will
+be applied in order.
 "#;
 
 const CHUNKED_TOPIC: &str = r#"
@@ -167,6 +153,7 @@ pub struct Arguments {
   pub filter: Option<FilterSet>,
   pub output: Option<PathBuf>,
   pub chunked: Option<ChunkInfo>,
+  pub translations: Vec<Translation>,
   pub range: (Option<LocalDateTime>, Option<LocalDateTime>),
   pub zip: bool,
 }
@@ -179,6 +166,7 @@ impl Arguments {
       filter: None,
       output: None,
       chunked: None,
+      translations: vec![],
       range: (None, None),
       zip: false,
     };
@@ -201,11 +189,12 @@ impl Arguments {
           "-h" | "--help" => {
             if let Some(topic) = src.next() {
               let message = match topic.as_ref() {
-                "pretty"  => PRETTY_TOPIC,
-                "filter"  => FILTER_TOPIC,
-                "range"   => RANGE_TOPIC,
-                "chunked" => CHUNKED_TOPIC,
-                _         => HELP
+                "pretty"    => PRETTY_TOPIC,
+                "filter"    => FILTER_TOPIC,
+                "range"     => RANGE_TOPIC,
+                "translate" => TRANSLATE_TOPIC,
+                "chunked"   => CHUNKED_TOPIC,
+                _           => HELP
               };
 
               println!("{}", message);
@@ -342,6 +331,14 @@ impl Arguments {
             };
 
             init.range = range
+          }
+          "-t" | "--translate" => {
+            let output = src.next().expect("Argument --translate must be followed by a TARGET_FIELD and then a PATTERN argument");
+            let pattern = src.next().expect("Argument --translate TARGET_FIELD must be followed by a PATTERN argument");
+
+            let translation = Translation::parse(output, &pattern);
+
+            init.translations.push(translation);
           }
           _ => {
             panic!("Unknown property '{next}'. Run saw with --help to see all known properties");
