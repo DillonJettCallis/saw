@@ -3,7 +3,7 @@ use std::io::Write;
 use std::iter::Peekable;
 use std::str::Chars;
 use std::vec::IntoIter;
-use regex::{Regex, RegexBuilder};
+use regex::Regex;
 
 use serde_json::{Map, Value};
 
@@ -34,15 +34,13 @@ enum PrettyFragment {
 enum PrettyToken {
   Literal(String),
   Variable(String),
-  OpenParen,
-  CloseParen,
   Slash,
 }
 
 /*
 
 Example:
-%message %prefix(a thing/%stack)
+%message %prefix/a thing/%stack/
 
 Given:
 {"message": "plain", "stack": "stacktrace here"}
@@ -67,8 +65,6 @@ lazy_static! {
     ('%', '%'),
     ('\\', '\\'),
     ('/', '/'),
-    ('(', '('),
-    (')', ')'),
   ]);
 }
 
@@ -102,15 +98,13 @@ impl PrettyDescriptor {
       let ans = match next {
         PrettyToken::Literal(lit) => PrettyFragment::Literal(lit),
         PrettyToken::Variable(name) => {
-          if let Some(PrettyToken::OpenParen) = src.peek() {
+          if let Some(PrettyToken::Slash) = src.peek() {
             src.next();
             PrettyDescriptor::parse_function(src, &name)
           } else {
             PrettyFragment::Variable(name)
           }
         }
-        PrettyToken::OpenParen => panic!("Unexpected '(' found in pattern! Did you mean to escape it?"),
-        PrettyToken::CloseParen => panic!("Unexpected ')' found in pattern! Did you mean to escape it?"),
         PrettyToken::Slash => panic!("Unexpected '/' found in pattern! Did you mean to escape it?"),
       };
 
@@ -123,50 +117,15 @@ impl PrettyDescriptor {
   fn parse_function(src: &mut Peekable<IntoIter<PrettyToken>>, name: &str) -> PrettyFragment {
     match name {
       "prefix" => {
-        let prefix = PrettyDescriptor::parse_argument(src);
+        let prefix = PrettyDescriptor::parse_pattern_argument(src);
+        let base = PrettyDescriptor::parse_pattern_argument(src);
 
-        if let Some(PrettyToken::Slash) = src.next() {
-        } else {
-          panic!("%prefix in pattern requires exactly two arguments! Found only one.");
-        }
-
-        let base = PrettyDescriptor::parse_argument(src);
-
-        if let Some(PrettyToken::CloseParen) = src.next() {
-          PrettyFragment::Prefix { prefix, base }
-        } else {
-          panic!("%prefix in pattern requires exactly two arguments! Found more than two!");
-        }
+        PrettyFragment::Prefix { prefix, base }
       }
       "replace" | "replaceAll" => {
-        let base = PrettyDescriptor::parse_argument(src);
-
-        if let Some(PrettyToken::Slash) = src.next() {
-        } else {
-          panic!("%regex in pattern requires exactly three arguments! Found only one.");
-        }
-
-        let regex_pattern = if let Some(PrettyToken::Literal(lit)) = src.next() {
-          lit
-        } else {
-          panic!("Second argument to  %regex needs to be a literal, it can't be any other kind of expression")
-        };
-
-        if let Some(PrettyToken::Slash) = src.next() {
-        } else {
-          panic!("%regex in pattern requires least three arguments! Found only two.");
-        }
-
-        let replacement = if let Some(PrettyToken::Literal(lit)) = src.next() {
-          lit
-        } else {
-          panic!("Third argument to  %regex needs to be a literal, it can't be any other kind of expression")
-        };
-
-        if let Some(PrettyToken::CloseParen) = src.next() {
-        } else {
-          panic!("%regex in pattern requires exactly three arguments! Expected close after that.");
-        }
+        let base = PrettyDescriptor::parse_pattern_argument(src);
+        let regex_pattern = PrettyDescriptor::parse_literal_argument(src);
+        let replacement = PrettyDescriptor::parse_literal_argument(src);
 
         let regex = Regex::new(&regex_pattern).expect("%regex pattern is invalid!");
 
@@ -181,24 +140,36 @@ impl PrettyDescriptor {
     }
   }
 
-  fn parse_argument(src: &mut Peekable<IntoIter<PrettyToken>>) -> PrettyDescriptor {
+  fn parse_pattern_argument(src: &mut Peekable<IntoIter<PrettyToken>>) -> PrettyDescriptor {
     let mut fragments = Vec::<PrettyFragment>::new();
 
     loop {
-      let next = src.peek().expect("Pattern contains unterminated function call");
-
-      match next {
-        PrettyToken::Slash | PrettyToken::CloseParen  => return PrettyDescriptor{fragments},
-        PrettyToken::OpenParen => panic!("Unexpected '(' found in pattern! Did you mean to escape it?"),
-        _ => {
-          if let Some(frag) = PrettyDescriptor::parse_expression(src) {
-            fragments.push(frag)
-          } else {
-            panic!("Pattern contains unterminated function call")
-          }
+      if let PrettyToken::Slash = src.peek().expect("Pattern contains unterminated function call") {
+        src.next();
+        return PrettyDescriptor{fragments};
+      } else {
+        if let Some(frag) = PrettyDescriptor::parse_expression(src) {
+          fragments.push(frag)
+        } else {
+          panic!("Pattern contains unterminated function call")
         }
       }
     }
+  }
+
+  fn parse_literal_argument(src: &mut Peekable<IntoIter<PrettyToken>>) -> String {
+    let regex_pattern = if let Some(PrettyToken::Literal(lit)) = src.next() {
+      lit
+    } else {
+      panic!("Expected string argument to function")
+    };
+
+    if let Some(PrettyToken::Slash) = src.next() {
+    } else {
+      panic!("Function ended unexpectedly");
+    }
+
+    return regex_pattern;
   }
 
   fn lex(pattern: &str) -> Vec<PrettyToken> {
@@ -214,14 +185,6 @@ impl PrettyDescriptor {
           PrettyDescriptor::lex_identifier(&mut src, &mut name);
           tokens.push(PrettyToken::Variable(name));
         }
-        '(' => {
-          src.next();
-          tokens.push(PrettyToken::OpenParen)
-        },
-        ')' => {
-          src.next();
-          tokens.push(PrettyToken::CloseParen)
-        },
         '/' => {
           src.next();
           tokens.push(PrettyToken::Slash)
@@ -250,10 +213,15 @@ impl PrettyDescriptor {
         '\\' => {
           src.next(); // discard the slash
           let follow = src.next().expect("Pattern cannot end with an unmatched '\\' character.");
+
+          if follow == 'v' {
+            return;
+          }
+
           let found = ESCAPE_MAP.get(&follow).expect(&format!("Pattern contained unknown and invalid escape sequence '{follow}'"));
           name.push(found.clone());
         }
-        '%' | '(' | '/' | ')' => {
+        '%' | '/' => {
           return;
         }
         _ => {
