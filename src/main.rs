@@ -23,6 +23,7 @@ mod args;
 mod chunk;
 mod filter;
 mod pretty;
+mod translate;
 mod utils;
 
 fn main() {
@@ -282,7 +283,7 @@ fn do_pretty<Iter: 'static + Iterator<Item=Line>>(
 ) {
   if let Some(pretty) = maybe_pretty {
     src.for_each(move |line| {
-      pretty.print(line.value, &mut target);
+      pretty.print(&line.value, &mut target);
       target.end_line();
     })
   } else {

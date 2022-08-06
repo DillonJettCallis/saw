@@ -100,6 +100,37 @@ Strictly speaking you can supply * for both MIN and MAX and this is equivalent t
 MIN is inclusive, MAX is exclusive.
 "#;
 
+/**
+
+Possible actions
+
+rename field
+delete field
+copy field
+regex field
+trim field
+concat multiple fields
+
+*/
+
+const TRANSLATE_TOPIC: &str = r#"
+Usage:
+  saw --translate [SUB_TASK]
+
+SUB_TASK values are as such:
+  rename OLD_NAME NEW_NAME    Rename a field from OLD_NAME to NEW_NAME.
+  delete FIELD                Remove field with this name.
+  copy FIELD NEW_FIELD        Duplicates FIELD with the new name NEW_FIELD.
+  trim FIELD                  Removes leading and trailing whitespace around FIELD.
+  concat NEW_FIELD PATTERN    Create a new field based upon a pattern supplied by PATTERN
+                                  which is implemented the same way as PRETTY
+
+
+Translate is used to perform regex replacements on fields.
+Translation always occures AFTER filter and BEFORE pretty.
+
+"#;
+
 const CHUNKED_TOPIC: &str = r#"
 Usage:
   saw --output file --chunked SIZE
