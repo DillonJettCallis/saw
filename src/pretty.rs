@@ -37,25 +37,6 @@ enum PrettyToken {
   Slash,
 }
 
-/*
-
-Example:
-%message %prefix/a thing/%stack/
-
-Given:
-{"message": "plain", "stack": "stacktrace here"}
-
-Prints:
-plain a thing stacktrace here
-
-Given:
-{"message": "plain"}
-
-Prints:
-plain
-
-*/
-
 lazy_static! {
   static ref ESCAPE_MAP: HashMap<char, char> = HashMap::from([
     ('t', '\t'),

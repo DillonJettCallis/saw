@@ -13,20 +13,22 @@ use crate::translate::Translation;
 
 const HELP: &str = r#"
 saw SOURCE_FILES
-  -h, --help [TOPIC]     Print help. If TOPIC is provided it will give more detail or list the topics
-  -v, --version          Prints the version of saw
-  -p, --pretty [PATTERN] Pretty print output as text instead of gzipped json PATTERN is optional and defines a pattern
-  -f, --filter PATTERN   Filter based on contents, PATTERN defines how and what to match on
-  -o, --output PATH      Instead of outputting to stdout, pipe results to a file directly
-  -c, --chunked [SIZE]   Requires --output option. Chunks output into multiple files based on size or number of lines
-  -r, --range MIN MAX    Filters logs to between the two given timestamps, (min is inclusive, max is exclusive)
-  -z, --zip true|false   Gzip output. Defaults to true if output is provided and false otherwise
-  -j, --json true|false  Output as JSON. Has defaults for all cases. Passing true while also providing pretty is illegal
+  -h, --help [TOPIC]            Print help. If TOPIC is provided it will give more detail or list the topics
+  -v, --version                 Prints the version of saw
+  -p, --pretty [PATTERN]        Pretty print output as text instead of gzipped json PATTERN is optional and defines a pattern
+  -f, --filter PATTERN          Filter based on contents, PATTERN defines how and what to match on
+  -o, --output PATH             Instead of outputting to stdout, pipe results to a file directly
+  -c, --chunked [SIZE]          Requires --output option. Chunks output into multiple files based on size or number of lines
+  -r, --range MIN MAX           Filters logs to between the two given timestamps, (min is inclusive, max is exclusive)
+  -t, --translate FIELD PATTERN Transform strings before printing them
+  -z, --zip true|false          Gzip output. Defaults to true if output is provided and false otherwise
+  -j, --json true|false         Output as JSON. Has defaults for all cases. Passing true while also providing pretty is illegal
 
 help TOPIC values are:
   pretty    How pretty printing patterns work
   filter    How filtering patterns work
   range     How to use the range option
+  translate How to use the translate feature (it's like sed for json)
   chunked   The syntax for chunked size limits
 "#;
 
@@ -34,14 +36,36 @@ const PRETTY_TOPIC: &str = r#"
 Usage:
   saw --pretty [PATTERN]
 
-Pretty patterns are simply % prefixed JSON keys and constants.
+Pretty patterns are simply % prefixed JSON keys, constants and functions.
 
-For example, the default pattern is "[%time] %message %stack".
+For example, the default pattern is "[%time] %message %prefix/\n/%stack\v/".
 
 This prints the 'time' key surounded by square brackets, a space,
-then the value of the message key, then the value of the stack key.
+then the value of the message key, then the value of the stack key prefixed with a newline.
+The \v seperates the %stack variable from the / because that's the syntax for a function.
 
 If a field is missing, like stack, then an empty string will be used instead.
+
+Excape characters are done with \.
+Escapable charcters are:
+t => tab
+n => newline
+r => carige return
+s => ordinary space
+v => nothing .. useful to terminate a pattern
+/ => /
+\ => \
+% => %
+
+Functions are used like:
+%function/argument/another argument/
+
+Function arguments might take strings or patterns.
+
+Existing functions so far are:
+%prefix/pattern to use as prefix/content pattern/
+%replace/base pattern/regex/regex replacement/
+%replaceAll/base pattern/regex/regex replacement/
 "#;
 
 const FILTER_TOPIC: &str = r#"
@@ -144,7 +168,7 @@ Examples:
   Rollover every 1000 lines: `saw --output ex --chunked 1000ln`
 "#;
 
-const DEFAULT_PRETTY: &str = "[%time] %message %stack";
+const DEFAULT_PRETTY: &str = "[%time] %message %prefix/\\n/%stack\\v/";
 
 #[derive(Debug)]
 pub struct Arguments {
