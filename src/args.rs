@@ -8,6 +8,7 @@ use glob::glob;
 
 use crate::chunk::ChunkInfo;
 use crate::filter::FilterSet;
+use crate::LogFile;
 use crate::pretty::PrettyDescriptor;
 use crate::translate::Translation;
 
@@ -23,6 +24,11 @@ saw SOURCE_FILES
   -t, --translate FIELD PATTERN Transform strings before printing them
   -z, --zip true|false          Gzip output. Defaults to true if output is provided and false otherwise
   -j, --json true|false         Output as JSON. Has defaults for all cases. Passing true while also providing pretty is illegal
+
+Mutiple source files can be passed, and all are treated as globs.
+
+You can also pass "-" to read stdin as a source file, in a addition to any other sources.
+stdin must be plain text and cannot be gzipped.
 
 help TOPIC values are:
   pretty    How pretty printing patterns work
@@ -170,9 +176,8 @@ Examples:
 
 const DEFAULT_PRETTY: &str = "[%time] %message %prefix/\\n/%stack\\v/";
 
-#[derive(Debug)]
 pub struct Arguments {
-  pub sources: Vec<PathBuf>,
+  pub sources: Vec<LogFile>,
   pub pretty: Option<PrettyDescriptor>,
   pub filter: Option<FilterSet>,
   pub output: Option<PathBuf>,
@@ -210,6 +215,9 @@ impl Arguments {
     while let Some(next) = src.next() {
       if next.starts_with("-") {
         match next.as_ref() {
+          "-" => {
+            init.sources.push(LogFile::from_stdin())
+          }
           "-h" | "--help" => {
             if let Some(topic) = src.next() {
               let message = match topic.as_ref() {
@@ -419,12 +427,12 @@ impl Arguments {
     return init;
   }
 
-  fn read_path(raw: &str) -> Vec<PathBuf> {
+  fn read_path(raw: &str) -> Vec<LogFile> {
     glob(raw)
       .expect(&format!(
         "Source '{raw}' is not valid or directory could not be read"
       ))
-      .map(|p| p.expect(&format!("Source '{raw}' is not valid or could not be read")))
+      .map(|p| LogFile::from_file(&p.expect(&format!("Source '{raw}' is not valid or could not be read"))))
       .collect()
   }
 

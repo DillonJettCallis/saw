@@ -124,7 +124,7 @@ impl ChunkedWriter {
     let base_file_name = self.base_path.file_name().unwrap().to_str().unwrap();
     let file_name = base_file_name.to_owned() + "." + &index.to_string() + ext;
 
-    let mut file_path = self.base_path.with_file_name(file_name);
+    let file_path = self.base_path.with_file_name(file_name);
 
     self.chunk_index += 1;
     let file = BufWriter::new(File::create(file_path).expect(&format!("Failed to create file '{}.{}'", self.base_path.to_str().unwrap_or("<invalid>"), self.chunk_index)));
