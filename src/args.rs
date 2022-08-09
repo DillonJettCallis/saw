@@ -237,7 +237,7 @@ impl Arguments {
             exit(0);
           }
           "-v" | "--version" => {
-            eprintln!("0.1.0");
+            eprintln!("0.2.0");
             exit(0);
           }
           "-p" | "--pretty" => {
