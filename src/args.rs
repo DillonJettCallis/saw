@@ -237,7 +237,7 @@ impl Arguments {
             exit(0);
           }
           "-v" | "--version" => {
-            eprintln!("0.2.0");
+            eprintln!(env!("CARGO_PKG_VERSION"));
             exit(0);
           }
           "-p" | "--pretty" => {
