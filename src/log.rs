@@ -33,11 +33,11 @@ impl LogFile {
 
   pub fn from_file(path: &PathBuf) -> LogFile {
     let name = path.to_str().unwrap_or("<invalid path>").to_string();
-    let mut file = File::open(path).expect(&format!("Failed to open file {name}"));
+    let mut file = File::open(path).unwrap_or_else(|_| panic!("Failed to open file {name}"));
     let mut gzip_check = [0u8; 2];
     let read = file
       .read(&mut gzip_check)
-      .expect(&format!("Failed to open file {name}"));
+      .unwrap_or_else(|_| panic!("Failed to open file {name}"));
     file.rewind().expect("Failed to rewind file!");
 
     let src: Box<dyn BufRead> = if read != 2 || GZIP_MAGIC != gzip_check {
@@ -108,7 +108,7 @@ impl LogFile {
     let mut raw = String::new();
     let read = self.src
       .read_line(&mut raw)
-      .expect(&format!("Failed to read line from file {}", self.name));
+      .unwrap_or_else(|_| panic!("Failed to read line from file {}", self.name));
     let file = self.name.clone();
     let line = self.line;
     self.line += 1;
@@ -131,7 +131,7 @@ impl LogFile {
       .and_then(|time| time.as_str()) // convert it to a string
       .and_then(|time| LocalDateTime::from_str(time).ok()) // convert to type
     {
-      Some(time) => time.clone(),
+      Some(time) => *time,
       None => {
         eprintln!("Invalid or missing 'time' field in JSON from file '{file}' at line {line}");
         return false;
@@ -160,16 +160,39 @@ impl Aggregator {
     // load up initial values and remove any that are empty
     logs.iter_mut().for_each(|log| {
       log.advance();
-      ()
     });
 
     // keep only those that are not completed
     logs.retain(|log| !log.is_completed);
 
     // sort them most oldest first
-    logs.sort_unstable_by(|left, right| right.time().cmp(&left.time()));
+    logs.sort_unstable_by_key(|log| log.time());
 
     Aggregator { logs }
+  }
+
+  /**
+   * Skip any file that doesn't contain values in the range
+  **/
+  pub fn filter_daily(&mut self, src: (Option<LocalDateTime>, Option<LocalDateTime>)) {
+    match src {
+      (None, None) => panic!("This case should have been prevented by the args parser"),
+      (Some(min), None) => {
+        let range = min.date()..;
+
+        self.logs.retain(|log| range.contains(&log.time().date()));
+      }
+      (None, Some(max)) => {
+        let range = ..=max.date();
+
+        self.logs.retain(|log| range.contains(&log.time().date()));
+      }
+      (Some(min), Some(max)) => {
+        let range = min.date()..=max.date();
+
+        self.logs.retain(|log| range.contains(&log.time().date()));
+      }
+    }
   }
 }
 

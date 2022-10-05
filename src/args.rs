@@ -21,6 +21,7 @@ saw SOURCE_FILES
   -o, --output PATH             Instead of outputting to stdout, pipe results to a file directly
   -c, --chunked [SIZE]          Requires --output option. Chunks output into multiple files based on size or number of lines
   -r, --range MIN MAX           Filters logs to between the two given timestamps, (min is inclusive, max is exclusive)
+    --daily                     Tell saw that all lines in a single log file have the same date. This way saw can skip whole files that fall outside of range.
   -t, --translate FIELD PATTERN Transform strings before printing them
   -z, --zip true|false          Gzip output. Defaults to true if output is provided and false otherwise
   -j, --json true|false         Output as JSON. Has defaults for all cases. Passing true while also providing pretty is illegal
@@ -184,6 +185,7 @@ pub struct Arguments {
   pub chunked: Option<ChunkInfo>,
   pub translations: Vec<Translation>,
   pub range: (Option<LocalDateTime>, Option<LocalDateTime>),
+  pub daily: bool,
   pub zip: bool,
 }
 
@@ -197,6 +199,7 @@ impl Arguments {
       chunked: None,
       translations: vec![],
       range: (None, None),
+      daily: false,
       zip: false,
     };
 
@@ -364,6 +367,13 @@ impl Arguments {
 
             init.range = range
           }
+          "--daily" => {
+            if init.daily {
+              panic!("Cannot pass argument --daily twice!")
+            }
+
+            init.daily = true;
+          }
           "-t" | "--translate" => {
             let output = src.next().expect("Argument --translate must be followed by a TARGET_FIELD and then a PATTERN argument");
             let pattern = src.next().expect("Argument --translate TARGET_FIELD must be followed by a PATTERN argument");
@@ -422,6 +432,11 @@ impl Arguments {
     if !has_zip {
       // set zip on if pretty it off
       init.zip = init.pretty.is_none()
+    }
+
+    // if you set daily but didn't provide a range
+    if init.daily && init.range == (None, None) {
+      panic!("Cannot pass the --daily flag without a range! Add a range or remove --daily")
     }
 
     return init;

@@ -29,7 +29,11 @@ mod utils;
 fn main() {
   let args = Arguments::parse();
 
-  let agg = Aggregator::new(args.sources);
+  let mut agg = Aggregator::new(args.sources);
+
+  if args.daily {
+    agg.filter_daily(args.range);
+  }
 
   let ranged = do_range(agg, args.range);
   let filtered = do_filter(ranged, args.filter);
